@@ -324,6 +324,16 @@ async function searchForNewUrl(page, offer) {
   }
 }
 
+export function buildContentFilter(contentFilter) {
+  if (!contentFilter) return () => true;
+  const negative = normalizeKeywordList(contentFilter.negative);
+
+  return (text) => {
+    if (typeof text !== 'string' || text.trim() === '') return true;
+    const lower = text.toLowerCase();
+    return !negative.some(k => lower.includes(k));
+  };
+}
 // ── Dedup ───────────────────────────────────────────────────────────
 
 const PERMANENT_SCAN_HISTORY_STATUSES = new Set([
@@ -642,6 +652,7 @@ async function main() {
   const titleFilter = buildTitleFilter(config.title_filter);
   const locationFilter = buildLocationFilter(config.location_filter);
   const salaryFilter = buildSalaryFilter(config.salary_filter);
+  const contentFilter = buildContentFilter(config.content_filter);
 
   // 3. Resolve a provider for each enabled company / board
   const targets = [];
@@ -713,6 +724,7 @@ async function main() {
   let totalFilteredTitle = 0;
   let totalFilteredLocation = 0;
   let totalFilteredSalary = 0;
+  let totalFilteredContent = 0;
   let totalDupes = 0;
   const newOffers = [];
   const errors = [...resolveErrors];
@@ -753,6 +765,10 @@ async function main() {
         }
         if (!salaryFilter(job.salary)) {
           totalFilteredSalary++;
+          continue;
+        }
+        if (!contentFilter(job.description || job.content || '')) {
+          totalFilteredContent++;
           continue;
         }
         if (seenUrls.has(job.url)) {
@@ -851,7 +867,8 @@ async function main() {
   console.log(`Total jobs found:      ${totalFound}`);
   console.log(`Filtered by title:     ${totalFilteredTitle} removed`);
   console.log(`Filtered by location:  ${totalFilteredLocation} removed`);
-  console.log(`Filtered by salary:   ${totalFilteredSalary} removed`);
+  console.log(`Filtered by salary:    ${totalFilteredSalary} removed`);
+  console.log(`Filtered by content:   ${totalFilteredContent} removed`);
   console.log(`Duplicates:            ${totalDupes} skipped`);
   if (historyPolicy.recheckAfterDays != null) {
     console.log(`Recheck eligible:      ${seenUrlState.recheckEligible} old scan-history URL(s)`);

@@ -23,6 +23,7 @@
  *                               usable date. scan.mjs ignores it; consumers
  *                               like scan-ats-full.mjs use it for recency
  *                               filtering.
+ * @property {string} [description] Optional, full text of the job description or body.
  */
 
 /**

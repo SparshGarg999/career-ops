@@ -31,6 +31,7 @@ export default {
       company: entry.name,
       location: j.categories?.location || '',
       postedAt: typeof j.createdAt === 'number' ? j.createdAt : undefined,
+      description: j.description || j.descriptionPlain || '',
     }));
   },
 };

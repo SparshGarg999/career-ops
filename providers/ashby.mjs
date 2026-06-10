@@ -121,6 +121,7 @@ export default {
           location: j.location || '',
           salary: parseCompensation(j),
           postedAt: toEpochMs(j.publishedAt),
+          description: j.description || j.content || '',
         }));
       } catch (e) {
         lastErr = e;

@@ -14,11 +14,34 @@ Mode interactif pour le moment ou le candidat remplit un formulaire de candidatu
 2. IDENTIFIER   -> Extraire entreprise + role depuis la page
 3. RECHERCHER   -> Matcher avec les reports existants dans reports/
 4. CHARGER      -> Lire le report complet + Bloc G (si existant)
-5. COMPARER     -> Le role a l'ecran correspond-il a celui evalue ? Si changement -> alerter
+5. PRE-VALIDATION -> Valider la disponibilite du poste + correspondance entreprise/role (Preflight gate)
 6. ANALYSER     -> Identifier TOUTES les questions visibles du formulaire
 7. GENERER      -> Pour chaque question, generer une reponse personnalisee
 8. PRESENTER    -> Afficher les reponses formatees pour copier-coller
 ```
+
+## Etape 5 — Etape de pre-validation (Preflight gate)
+
+Avant de generer les moindres reponses pour la candidature, verifiez que le formulaire pointe toujours vers l'offre active visee. Cette validation s'execute apres la detection de la page, l'identification de l'entreprise/role, et le chargement du report correspondant.
+
+1. Lisez l'URL visible, le titre de la page, l'entreprise, le role, et tout signal d'expiration/fermeture.
+2. Si une URL est disponible, vous DEVEZ executer le script de verification de disponibilite de maniere programmatique :
+   ```bash
+   node check-liveness.mjs [URL]
+   ```
+   Analysez la sortie :
+   - Si la verification renvoie `expired` (ou si l'offre est clairement fermee/expiree) :
+     1. Interrompez le processus immediatement.
+     2. Mettez a jour le statut de l'offre dans `data/applications.md` a `Discarded`.
+     3. Informez l'utilisateur que l'offre a expire ou est fermee, que vous l'avez marquee comme `Discarded` et que vous avez annule la generation.
+   - Si la verification est `uncertain` ou echoue, avertissez le candidat, demandez-lui de verifier manuellement, et ne poursuivez que s'il confirme que l'offre est toujours active.
+3. Comparez l'entreprise et le role visibles a l'ecran avec le report charge.
+4. Si l'entreprise ou le titre du poste ont change de maniere significative, arretez-vous avant de rediger et demandez :
+   "Le formulaire semble concerner [entreprise visible] — [role visible], mais le report associe est [entreprise du report] — [role du report]. Souhaitiez-vous que je reevalue l'offre, que j'adapte les reponses malgre ce decalage, ou que je m'arrete ?"
+5. Si l'offre semble fermee, refusez de generer la copie finale a moins que le candidat n'outrepasse explicitement avec un motif connu.
+6. Si la disponibilite ne peut pas etre verifiee parce que le candidat a seulement colle les questions ou partage une capture d'ecran, signalez cette limite et demandez au candidat de confirmer l'entreprise, le role et l'activite de l'offre avant de rediger.
+
+Ne pas passer a l'Etape 6 tant que cette pre-validation n'est pas resolue.
 
 ## Etape 1 -- Detecter l'offre
 
@@ -45,7 +68,7 @@ Si le role a l'ecran differe de celui evalue :
 - **Si reevaluer** : Lancer l'evaluation complete A-F, mettre a jour le report, regenerer le Bloc G
 - **Mettre a jour le tracker** : Modifier le titre du role dans applications.md si necessaire
 
-## Etape 4 -- Analyser les questions du formulaire
+## Etape 6 -- Analyser les questions du formulaire
 
 Identifier TOUTES les questions visibles :
 - Champs de texte libre (lettre de motivation, "pourquoi ce poste", motivation, etc.)
@@ -58,7 +81,7 @@ Classifier chaque question :
 - **Deja repondue dans le Bloc G** -> reprendre la reponse existante
 - **Nouvelle question** -> generer la reponse depuis le report + `cv.md`
 
-## Etape 5 -- Generer les reponses
+## Etape 7 -- Generer les reponses
 
 Pour chaque question, construire la reponse selon ce schema :
 
@@ -99,7 +122,7 @@ Notes :
 - [Suggestions de personnalisation que le candidat devrait verifier]
 ```
 
-## Etape 6 -- Apres la candidature (optionnel)
+## Etape 8 -- Apres la candidature (optionnel)
 
 Si le candidat confirme que la candidature est envoyee :
 1. Mettre a jour le statut dans `applications.md` de "Evaluated" a "Applied"

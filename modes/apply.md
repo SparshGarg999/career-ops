@@ -25,9 +25,16 @@ Interactive mode for when the candidate is filling out an application form in Ch
 Before generating any application answers, verify that the form still points to the intended active job. This gate runs after the page has been detected, the company/role has been identified, and the matching report has been loaded.
 
 1. Read the visible URL, page title, company, role, and any closed/expired signals.
-2. If a URL is available, verify liveness with Playwright:
-   - active posting evidence: title/role + job description or form fields + submit/apply path
-   - closed posting evidence: expired/closed/no longer accepting applications, missing JD with only nav/footer, hard redirect to generic careers/search, or 404/410
+2. If a URL is available, you MUST programmatically run the liveness checker:
+   ```bash
+   node check-liveness.mjs [URL]
+   ```
+   Parse the output:
+   - If the check returns `expired` (or the posting is clearly closed/expired):
+     1. Abort the process immediately.
+     2. Update the status of the listing in `data/applications.md` to `Discarded`.
+     3. Notify the user that the listing has expired/closed, and you have marked it as `Discarded` and aborted further generation.
+   - If the check is `uncertain` or fails, warn the candidate, ask them to verify manually, and proceed only if they confirm the job is still active.
 3. Compare the visible company and role against the matched report.
 4. If company or title changed materially, stop before drafting and ask:
    "The form appears to be for [visible company] — [visible role], but the matched report is [report company] — [report role]. Do you want me to re-evaluate, adapt with this mismatch, or stop?"

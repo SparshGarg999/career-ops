@@ -14,11 +14,34 @@ Interaktiver Modus für den Moment, in dem der Kandidat in Chrome ein Bewerbungs
 2. IDENTIFIZIEREN → Firma + Rolle aus der Seite extrahieren
 3. SUCHEN       → mit bestehenden Reports unter reports/ abgleichen
 4. LADEN        → vollständigen Report lesen + Block G (falls vorhanden)
-5. VERGLEICHEN  → Stimmt die Rolle auf dem Bildschirm mit der bewerteten überein? Wenn sie sich geändert hat → warnen
+5. VORPRÜFUNG   → Stellen-Liveness + Firmen/Rollen-Übereinstimmung vor dem Entwerfen bestätigen (Preflight-Gate)
 6. ANALYSIEREN  → ALLE sichtbaren Fragen des Formulars identifizieren
 7. ERZEUGEN     → Für jede Frage eine passgenaue Antwort generieren
 8. PRÄSENTIEREN → Antworten formatiert zum Copy-Paste ausgeben
 ```
+
+## Schritt 5 — Preflight-Gate (Vorprüfung)
+
+Vor der Generierung von Bewerbungsantworten muss überprüft werden, ob das Formular noch auf eine aktive Stelle verweist. Dieses Gate wird ausgeführt, nachdem die Seite erkannt, das Unternehmen/die Rolle identifiziert und der entsprechende Report geladen wurde.
+
+1. Lesen Sie die sichtbare URL, den Seitentitel, das Unternehmen, die Rolle und alle Signale für geschlossene/abgelaufene Stellen.
+2. Wenn eine URL verfügbar ist, MÜSSEN Sie den Liveness-Checker programmgesteuert ausführen:
+   ```bash
+   node check-liveness.mjs [URL]
+   ```
+   Analysieren Sie die Ausgabe:
+   - Wenn die Prüfung `expired` zurückgibt (oder die Stelle eindeutig geschlossen/abgelaufen ist):
+     1. Brechen Sie den Vorgang sofort ab.
+     2. Aktualisieren Sie den Status der Stelle in `data/applications.md` auf `Discarded`.
+     3. Informieren Sie den Benutzer, dass die Stelle abgelaufen/geschlossen ist, Sie sie als `Discarded` markiert und die weitere Generierung abgebrochen haben.
+   - Wenn die Prüfung `uncertain` ergibt oder fehlschlägt, warnen Sie den Kandidaten, bitten Sie ihn, manuell zu prüfen, und fahren Sie nur fort, wenn er bestätigt, dass die Stelle noch aktiv ist.
+3. Vergleichen Sie das sichtbare Unternehmen und die Rolle mit dem übereinstimmenden Report.
+4. Wenn sich das Unternehmen oder der Titel wesentlich geändert hat, halten Sie vor dem Entwerfen an und fragen Sie:
+   "Das Formular scheint für [sichtbare Firma] — [sichtbare Rolle] zu sein, aber der übereinstimmende Report ist [Report Firma] — [Report Rolle]. Möchten Sie, dass ich die Stelle neu bewertete, die Antworten anpasse oder stoppe?"
+5. Wenn die Stelle geschlossen zu sein scheint, verweigern Sie die Erstellung der finalen Antworten, es sei denn, der Kandidat setzt sich explizit mit einem bekannten Grund darüber hinweg.
+6. Wenn die Liveness nicht überprüft werden kann, weil der Kandidat nur Fragen oder einen Screenshot eingefügt hat, weisen Sie auf diese Einschränkung hin und bitten Sie den Kandidaten, das Unternehmen, die Rolle und die aktive Stelle vor dem Entwerfen zu bestätigen.
+
+Fahren Sie nicht mit Schritt 6 fort, bis dieses Preflight-Gate aufgelöst ist.
 
 ## Schritt 1 — Stellenanzeige erkennen
 
@@ -45,7 +68,7 @@ Wenn die Rolle auf dem Bildschirm von der bewerteten abweicht:
 - **Wenn neu bewerten**: vollständige A-F-Bewertung durchführen, Report aktualisieren, Block G neu erzeugen
 - **Tracker aktualisieren**: in `applications.md` den Rollentitel anpassen, falls nötig
 
-## Schritt 4 — Fragen des Formulars analysieren
+## Schritt 6 — Fragen des Formulars analysieren
 
 ALLE sichtbaren Fragen identifizieren:
 - Freitextfelder (Anschreiben, "Warum diese Rolle", Motivation, etc.)
@@ -58,7 +81,7 @@ Jede Frage klassifizieren:
 - **Bereits in Block G beantwortet** → bestehende Antwort übernehmen
 - **Neue Frage** → Antwort aus dem Report + `cv.md` generieren
 
-## Schritt 5 — Antworten erzeugen
+## Schritt 7 — Antworten erzeugen
 
 Für jede Frage die Antwort nach folgendem Schema bauen:
 
@@ -99,7 +122,7 @@ Hinweise:
 - [Personalisierungs-Vorschläge, die der Kandidat nochmal prüfen sollte]
 ```
 
-## Schritt 6 — Nach dem Absenden (optional)
+## Schritt 8 — Nach dem Absenden (optional)
 
 Wenn der Kandidat bestätigt, dass die Bewerbung raus ist:
 1. Status in `applications.md` von "Evaluated" auf "Applied" setzen

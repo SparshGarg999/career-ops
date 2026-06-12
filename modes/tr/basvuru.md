@@ -10,14 +10,14 @@ Aday bir başvuru formunu doldururken çalışan etkileşimli mod. Ekrandakileri
 ## İş Akışı
 
 ```
-1. TESPİT ET      → Aktif sekmeyi oku (ekran görüntüsü / URL / sayfa başlığı)
-2. TANI KOY       → Sayfadan şirket adını ve rolü çıkar
-3. RAPORU BUL     → reports/ klasöründe bu ilana ait raporu ara
-4. YÜKLE          → Tam raporu oku (önceki değerlendirme + Blok G varsa)
+1. TESPIT ET       → Aktif sekmeyi oku (ekran görüntüsü / URL / sayfa başlığı)
+2. TANI KOY        → Sayfadan şirket adını ve rolü çıkar
+3. RAPORU BUL      → reports/ klasöründe bu ilana ait raporu ara
+4. PREFLIGHT       → Yanıt üretmeden önce ilanın geçerliliğini ve şirket/rol eşleşmesini doğrula
 5. KARŞILAŞTIR    → Ekrandaki rol raporla eşleşiyor mu? Farklıysa adayı uyar
 6. FORMU ANALİZ ET → Görünen tüm alanları ve soruları tespit et
-7. YANIT ÜRET     → Her alan için kişiselleştirilmiş yanıt oluştur
-8. SUN            → Kopyalanabilir biçimde göster
+7. YANIT ÜRET      → Her alan için kişiselleştirilmiş yanıt oluştur
+8. SUN             → Kopyalanabilir biçimde göster
 ```
 
 ## Adım 1 — İlanı Tespit Et
@@ -45,7 +45,30 @@ Ekrandaki rol önceki değerlendirmedekinden farklıysa:
 - **Yeniden değerlendirme:** Tam A-F değerlendirmesi yap, raporu güncelle, Blok G'yi yeniden üret
 - **Takipçiyi güncelle:** Gerekirse `applications.md`'deki rol başlığını düzelt
 
-## Adım 4 — Form Alanlarını Analiz Et
+## Adım 4 — Preflight Kapısı (Canlılık Kontrolü)
+
+Yanıtlar üretilmeden önce formun hala aktif bir ilana işaret ettiğinden emin olun. Bu kapı, sayfa tespiti, şirket/rol tespiti ve ilgili raporun yüklenmesinin ardından çalıştırılır.
+
+1. Görüntülenen URL, sayfa başlığı, şirket adı, rol ve ilan bitim sinyallerini oku.
+2. URL mevcut ise, liveness checker'ı programatik olarak çalıştır (zorunlu):
+   ```bash
+   node check-liveness.mjs [URL]
+   ```
+   Çıktıyı yorumla:
+   - `expired` dönülürse (veya ilan açıkça kapanmış/süresi dolmuşsa):
+     1. İşlemi hemen durdur.
+     2. `data/applications.md`'deki başvuru durumunu `Discarded` olarak güncelle.
+     3. İlanın süresi dolmuş/kapanmış olduğunu, `Discarded` olarak işaretlendiğini ve üretimin iptal edildiğini adayı bilgilendirdir.
+   - `uncertain` veya hata dönülürse, adayı uyar ve manuel doğrulama iste; ilanın aktif olduğunu onaylarsa devam et.
+3. Ekrandaki şirket ve rolü yüklenen raporla karşılaştır.
+4. Şirket veya rol adı önemli ölçüde farklıysa, üretimden önce dur ve sor:
+   "Form [ekran şirketi] — [görüntülenen rol] içinmiş gibi görünüyor ancak yüklenen rapor [rapor şirketi] — [rapor rolü] için. Yeniden değerlendirmek, eşleşmesizliğe rağmen devam etmek mi yoksa durmak mı istiyorsunuz?"
+5. İlan kapanmış görünüyorsa, aday bilinen bir nedenle açıkça geçersiz kılmadıkça final yanıtları üretmeyi reddet.
+6. Adayın URL olmadan sadece ekran görüntüsü yapıştırdığı durumlarda bu kısıtlamayı belirt ve şirket, rol ve ilanın aktif olduğunu onaylamasını iste.
+
+Preflight kapısı çözüme kavuşmadan Adım 5'e geçilmez.
+
+## Adım 5 — Form Alanlarını Analiz Et
 
 Görünen tüm alanları tespit et:
 - Serbest metin (ön yazı, "neden bu rol?", motivasyon vb.)
@@ -58,7 +81,7 @@ Her soruyu sınıflandır:
 - **Blok G'de zaten yanıtlanmış** → mevcut yanıtı uyarla
 - **Yeni soru** → rapor + `cv.md`'den yanıt üret
 
-## Adım 5 — Yanıtları Üret
+## Adım 6 — Yanıtları Üret
 
 Her soru için yanıtı şu şemaya göre oluştur:
 
@@ -100,7 +123,7 @@ Notlar:
 - [Adayın gözden geçirmesi gereken kişiselleştirme önerileri]
 ```
 
-## Adım 6 — Başvuru Sonrası (isteğe bağlı)
+## Adım 7 — Başvuru Sonrası (isteğe bağlı)
 
 Aday başvuruyu gönderdiğini onaylarsa:
 1. `applications.md`'de durumu `Evaluated`'dan `Applied`'a güncelle

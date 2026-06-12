@@ -86,6 +86,7 @@ You can invoke the command center or any of its modes directly within your CLI:
 * `scan` — Scan job portals for new offers
 * `tracker` — Show application status overview
 * `pdf` — Generate ATS-optimized CV PDF
+* `docx` — Generate ATS-optimized Word CV
 * `latex` — Export CV as LaTeX/Overleaf .tex
 * `cover` — Generate cover letter
 * `interview-prep` — Generate interview preparation guide

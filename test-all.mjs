@@ -96,7 +96,20 @@ function fileExists(path) { return existsSync(join(ROOT, path)); }
  * @param {string} path - Path relative to the career-ops repository root.
  * @returns {string} File contents.
  */
-function readFile(path) { return readFileSync(join(ROOT, path), 'utf-8'); }
+function readFile(path) {
+  let fullPath = join(ROOT, path);
+  if (process.platform === 'win32' && existsSync(fullPath)) {
+    const content = readFileSync(fullPath, 'utf-8');
+    if (content.length < 500 && !content.includes('\n') && (content.includes('/') || content.includes('\\'))) {
+      const targetPath = join(dirname(fullPath), content.trim());
+      if (existsSync(targetPath)) {
+        return readFileSync(targetPath, 'utf-8');
+      }
+    }
+    return content;
+  }
+  return readFileSync(fullPath, 'utf-8');
+}
 
 console.log('\n🧪 career-ops test suite\n');
 
@@ -839,8 +852,15 @@ try {
 for (const link of symlinks) {
   let resolved = null;
   let target = null;
+  let checkPath = join(ROOT, link);
+  if (process.platform === 'win32' && existsSync(checkPath)) {
+    const content = readFileSync(checkPath, 'utf-8').trim();
+    if (content.length < 500 && !content.includes('\n') && (content.includes('/') || content.includes('\\'))) {
+      checkPath = join(dirname(checkPath), content);
+    }
+  }
   try {
-    target = realpathSync(join(ROOT, link));
+    target = realpathSync(checkPath);
   } catch {
     target = null;
   }
@@ -849,7 +869,7 @@ for (const link of symlinks) {
     continue;
   }
   try {
-    resolved = realpathSync(join(ROOT, link));
+    resolved = realpathSync(checkPath);
   } catch {
     resolved = null;
   }
@@ -2405,6 +2425,9 @@ console.log('\n13. Batch rate-limit pause');
 
 try {
   const tmp = mkdtempSync(join(tmpdir(), 'co-batch-rate-'));
+  const bashShell = process.platform === 'win32' && existsSync('C:\\Program Files\\Git\\bin\\bash.exe')
+    ? 'C:\\Program Files\\Git\\bin\\bash.exe'
+    : 'bash';
   const batchDir = join(tmp, 'batch');
   const fakeBin = join(tmp, 'bin');
   mkdirSync(batchDir, { recursive: true });
@@ -2413,7 +2436,7 @@ try {
   mkdirSync(fakeBin, { recursive: true });
 
   writeFileSync(join(batchDir, 'batch-runner.sh'), readFileSync(join(ROOT, 'batch/batch-runner.sh'), 'utf-8'));
-  execFileSync('chmod', ['+x', join(batchDir, 'batch-runner.sh')]);
+  if (process.platform !== 'win32') execFileSync('chmod', ['+x', join(batchDir, 'batch-runner.sh')]);
   writeFileSync(join(tmp, 'merge-tracker.mjs'), 'console.log("merge fixture");\n');
   writeFileSync(join(tmp, 'verify-pipeline.mjs'), 'console.log("verify fixture");\n');
   writeFileSync(join(batchDir, 'batch-prompt.md'), 'URL={{URL}}\nJD={{JD_FILE}}\nREPORT={{REPORT_NUM}}\n');
@@ -2428,10 +2451,10 @@ try {
     'echo "You\\x27ve hit your session limit · resets 12:30pm (Asia/Taipei)"',
     'exit 1',
   ].join('\n') + '\n');
-  execFileSync('chmod', ['+x', join(fakeBin, 'claude')]);
+  if (process.platform !== 'win32') execFileSync('chmod', ['+x', join(fakeBin, 'claude')]);
 
   const env = { ...process.env, PATH: `${fakeBin}:${process.env.PATH}` };
-  const out = run('bash', [join(batchDir, 'batch-runner.sh'), '--parallel', '1', '--max-retries', '3', '--rate-limit-sleep', '0'], {
+  const out = run(bashShell, [join(batchDir, 'batch-runner.sh'), '--parallel', '1', '--max-retries', '3', '--rate-limit-sleep', '0'], {
     cwd: tmp,
     env,
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -2450,7 +2473,7 @@ try {
     '1\thttps://example.com/one\tpaused_rate_limit\t2026-01-01T00:00:00Z\t2026-01-01T00:00:01Z\t001\t-\tsession-limit; paused\t0',
     '2\thttps://example.com/two\tfailed\t2026-01-01T00:00:00Z\t2026-01-01T00:00:01Z\t002\t-\tworker-crash\t1',
   ].join('\n') + '\n');
-  const dry = run('bash', [join(batchDir, 'batch-runner.sh'), '--resume-paused', '--dry-run'], {
+  const dry = run(bashShell, [join(batchDir, 'batch-runner.sh'), '--resume-paused', '--dry-run'], {
     cwd: tmp,
     env,
     stdio: ['pipe', 'pipe', 'pipe'],

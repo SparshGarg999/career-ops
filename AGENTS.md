@@ -83,6 +83,7 @@ Output: `{"onboardingNeeded": <bool>, "missing": [...], "warnings": [...]}`, whe
 - **If, after that, `onboardingNeeded` is still true (any of `cv.md` / `config/profile.yml` / `portals.yml` is missing), enter onboarding mode.** Do NOT proceed with evaluations, scans, or any other mode until the basics are in place. Guide the user step by step:
 
 #### Step 0: Free Tier Guidance (if applicable)
+
 If the user mentions concerns about LLM costs, API pricing, or paid subscriptions, immediately surface that `career-ops` has fully free-tier support. Guide them to [FREE_TIER.md](./docs/FREE_TIER.md) which documents setting up the Gemini CLI (free authentication) and `gemini-eval.mjs` (free key via Google AI Studio).
 
 #### Step 1: CV (required)

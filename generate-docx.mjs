@@ -9,9 +9,10 @@
  * Standardized Calibri font, 0.35" margins, and exact accent color hexes.
  */
 
-import { readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { tmpdir } from 'os';
 import * as cheerio from 'cheerio';
 import {
   Document,
@@ -87,6 +88,56 @@ async function main() {
 
   if (!inputPath || !outputPath) {
     console.error('Usage: node generate-docx.mjs <input.html> <output.docx>');
+    process.exit(1);
+  }
+
+  // Validate paths to prevent traversal attacks and access to sensitive locations
+  const allowedDirs = [
+    resolve(process.cwd()),
+    resolve(tmpdir()),
+    '/tmp',
+  ].map(d => resolve(d).toLowerCase());
+
+  function isPathAllowed(p) {
+    const resolved = resolve(p);
+    const resolvedLower = resolved.toLowerCase();
+    
+    // Check if the path is within any of the allowed base directories
+    const isUnderAllowedDir = allowedDirs.some(dir => resolvedLower.startsWith(dir));
+    if (!isUnderAllowedDir) return false;
+
+    // Reject sensitive locations
+    const sensitivePatterns = [
+      /\.ssh[/\\]/,
+      /\.aws[/\\]/,
+      /\.config[/\\]/,
+      /\.npmrc/,
+      /\.bash_profile/,
+      /\.bashrc/,
+      /id_rsa/,
+    ];
+    if (sensitivePatterns.some(pat => pat.test(resolvedLower))) return false;
+
+    return true;
+  }
+
+  if (!isPathAllowed(inputPath)) {
+    console.error(`❌ Input path is not allowed: ${inputPath}`);
+    process.exit(1);
+  }
+  if (!isPathAllowed(outputPath)) {
+    console.error(`❌ Output path is not allowed: ${outputPath}`);
+    process.exit(1);
+  }
+
+  if (!existsSync(inputPath)) {
+    console.error(`❌ Input file not found: ${inputPath}`);
+    process.exit(1);
+  }
+
+  const stat = statSync(inputPath);
+  if (!stat.isFile()) {
+    console.error(`❌ Input path is not a file: ${inputPath}`);
     process.exit(1);
   }
 

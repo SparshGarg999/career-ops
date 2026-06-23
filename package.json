@@ -11,7 +11,7 @@
     "merge": "node merge-tracker.mjs",
     "reconcile": "node reconcile-pipeline.mjs",
     "pdf": "node generate-pdf.mjs",
-    "build:cv": "node generate-cv-html.mjs && node generate-pdf.mjs output/cv-sparsh-garg.html output/SparshGarg_Resume.pdf && node -e \"const fs = require('fs'); fs.copyFileSync('output/SparshGarg_Resume.pdf', 'SparshGarg_Resume (1).pdf')\"",
+    "build:cv": "node build-cv.mjs",
     "sync-check": "node cv-sync-check.mjs",
     "update:check": "node update-system.mjs check",
     "update:test": "node updater-migration-tests.mjs",

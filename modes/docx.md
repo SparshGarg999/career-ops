@@ -14,8 +14,9 @@
 10. Inject keywords naturally into existing achievements (NEVER invent)
 11. Generate full HTML from template + personalized content
 12. Read `name` from `config/profile.yml` → normalize to kebab-case lowercase (e.g. "John Doe" → "john-doe") → `{candidate}`
-13. Write HTML to `/tmp/cv-{candidate}-{company}.html`
-14. Execute: `node generate-docx.mjs /tmp/cv-{candidate}-{company}.html output/cv-{candidate}-{company}-{YYYY-MM-DD}.docx`
+13. Normalize `{company}` and `{role}` to kebab-case lowercase as well (removing spaces, path separators, and special characters)
+14. Write HTML to `/tmp/cv-{candidate}-{company}-{role}.html`
+15. Execute: `node generate-docx.mjs "/tmp/cv-{candidate}-{company}-{role}.html" "output/cv-{candidate}-{company}-{role}-{YYYY-MM-DD}.docx"`
 15. Report: DOCX path, keyword coverage %
 
 ## ATS Rules (clean parsing)

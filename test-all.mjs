@@ -258,6 +258,135 @@ try {
   } else {
     fail(`No-display degrade path wrong: ${noHeadedAvailable.result} (${noHeadedAvailable.code})`);
   }
+
+  // CDP (remote browser) page acquisition. Fake browsers record which context
+  // methods get called — no Playwright launch needed.
+  const { newLivenessPage, createHeadedPageProvider } = await import(
+    pathToFileURL(join(ROOT, 'liveness-browser.mjs')).href
+  );
+
+  // CDP mode reuses the connected browser's existing default context (real
+  // profile/cookies) and must NOT open a fresh context or spoof the UA.
+  let cdpNewContextCalls = 0;
+  const cdpDefaultPage = { id: 'default-ctx-page' };
+  const fakeCdpBrowser = {
+    contexts: () => [{ newPage: async () => cdpDefaultPage }],
+    newContext: async () => { cdpNewContextCalls += 1; return { newPage: async () => ({ id: 'fresh' }) }; },
+  };
+  const cdpPage = await newLivenessPage(fakeCdpBrowser, { remote: true });
+  if (cdpPage === cdpDefaultPage && cdpNewContextCalls === 0) {
+    pass('newLivenessPage(remote) reuses the CDP browser default context, no UA spoof');
+  } else {
+    fail(`CDP page acquisition wrong (newContext calls=${cdpNewContextCalls})`);
+  }
+
+  // Local mode opens a fresh context WITH the spoofed desktop UA.
+  let localUA = null;
+  const fakeLocalBrowser = {
+    contexts: () => [],
+    newContext: async (opts) => { localUA = opts?.userAgent || null; return { newPage: async () => ({ id: 'local-page' }) }; },
+  };
+  const localPage = await newLivenessPage(fakeLocalBrowser);
+  if (localPage.id === 'local-page' && /Chrome\/120/.test(localUA || '')) {
+    pass('newLivenessPage(local) opens a fresh context with spoofed UA');
+  } else {
+    fail(`Local page acquisition wrong (ua=${localUA})`);
+  }
+
+  // CDP challenge provider opens the captcha page in the connected real browser,
+  // reuses it across calls, and never closes the browser (caller owns it).
+  let cdpBrowserClosed = false;
+  const challengeBrowser = {
+    contexts: () => [{ newPage: async () => ({ id: 'challenge-page' }) }],
+    close: async () => { cdpBrowserClosed = true; },
+  };
+  const cdpProvider = createHeadedPageProvider(null, { cdpBrowser: challengeBrowser });
+  const cp1 = await cdpProvider.get();
+  const cp2 = await cdpProvider.get();
+  await cdpProvider.close();
+  if (cp1?.id === 'challenge-page' && cp1 === cp2 && cdpBrowserClosed === false) {
+    pass('CDP challenge provider reuses the connected browser and never closes it');
+  } else {
+    fail(`CDP challenge provider wrong (reused=${cp1 === cp2}, closed=${cdpBrowserClosed})`);
+  }
+
+  // browser.mjs env helpers + ownership-aware release (no Playwright launch).
+  const browserMod = await import(pathToFileURL(join(ROOT, 'browser.mjs')).href);
+  const prevCdp = process.env.CDP_URL;
+  delete process.env.CDP_URL;
+  const cdpOff = browserMod.usingCdp() === false && browserMod.cdpEndpoint() === '';
+  process.env.CDP_URL = 'http://localhost:9222';
+  const cdpOn = browserMod.usingCdp() === true && browserMod.cdpEndpoint() === 'http://localhost:9222';
+  if (prevCdp === undefined) delete process.env.CDP_URL; else process.env.CDP_URL = prevCdp;
+  if (cdpOff && cdpOn) {
+    pass('browser.mjs usingCdp/cdpEndpoint track CDP_URL');
+  } else {
+    fail(`CDP env helpers wrong (off=${cdpOff}, on=${cdpOn})`);
+  }
+
+  let remoteClosed = false;
+  await browserMod.releaseBrowser({ browser: { close: async () => { remoteClosed = true; } }, remote: true });
+  let localClosed = false;
+  await browserMod.releaseBrowser({ browser: { close: async () => { localClosed = true; } }, remote: false });
+  if (remoteClosed === false && localClosed === true) {
+    pass('releaseBrowser closes local launches but leaves CDP remotes open');
+  } else {
+    fail(`releaseBrowser ownership wrong (remoteClosed=${remoteClosed}, localClosed=${localClosed})`);
+  }
+
+  // SSRF guard — `rejectPrivateOrInvalid` has to refuse every URL whose host
+  // resolves to loopback / private / link-local space. The earlier guard only
+  // matched literal IPv4 patterns and bracketless IPv6, so several Chromium-
+  // routable bypasses (0.0.0.0, [::], [::1] (bracketed), [::ffff:127.0.0.1],
+  // localhost.) slipped through. These cases keep that regression covered.
+  const { rejectPrivateOrInvalid } = await import(
+    pathToFileURL(join(ROOT, 'liveness-browser.mjs')).href
+  );
+  const blockCases = [
+    ['http://0.0.0.0/admin', 'IPv4 all-zeros (Linux routes to loopback)'],
+    ['http://[::]/', 'IPv6 all-zeros (Linux routes to loopback)'],
+    ['http://[::1]/', 'IPv6 loopback (brackets included in url.hostname)'],
+    ['http://[::ffff:127.0.0.1]/', 'IPv4-mapped IPv6 loopback (dotted form)'],
+    ['http://[::ffff:7f00:1]/', 'IPv4-mapped IPv6 loopback (hex form)'],
+    ['http://[::ffff:169.254.169.254]/', 'IPv4-mapped IPv6 link-local (cloud metadata)'],
+    ['http://[fc00::1]/', 'IPv6 ULA (private)'],
+    ['http://[fe80::1]/', 'IPv6 link-local'],
+    ['http://localhost./', 'FQDN-trailing-dot localhost'],
+    ['http://localhost.localdomain/', 'localhost.localdomain alias'],
+    ['http://169.254.169.254/latest/meta-data/', 'cloud metadata IPv4 link-local'],
+    ['http://10.0.0.5/', 'IPv4 RFC1918'],
+  ];
+  let blockMissed = 0;
+  for (const [url, label] of blockCases) {
+    const verdict = rejectPrivateOrInvalid(url);
+    if (verdict?.code !== 'blocked_host') {
+      fail(`SSRF guard missed ${label}: ${url} → ${verdict ? verdict.code : 'allowed'}`);
+      blockMissed += 1;
+    }
+  }
+  if (blockMissed === 0) pass(`SSRF guard blocks ${blockCases.length} known bypass vectors`);
+
+  const allowCases = [
+    'https://boards.greenhouse.io/example/jobs/123',
+    'https://jobs.lever.co/example/abc-def',
+    'https://example.com/careers/role',
+    'https://www.pracuj.pl/praca/role,oferta,1234567',
+  ];
+  let allowDenied = 0;
+  for (const url of allowCases) {
+    if (rejectPrivateOrInvalid(url) !== null) {
+      fail(`SSRF guard false-positive on legitimate ATS URL: ${url}`);
+      allowDenied += 1;
+    }
+  }
+  if (allowDenied === 0) pass('SSRF guard lets legitimate ATS URLs through');
+
+  const protoCase = rejectPrivateOrInvalid('file:///etc/passwd');
+  if (protoCase?.code === 'unsupported_protocol') {
+    pass('SSRF guard rejects unsupported protocol');
+  } else {
+    fail(`SSRF guard let unsupported protocol through: ${protoCase?.code ?? 'allowed'}`);
+  }
 } catch (e) {
   fail(`Liveness classification tests crashed: ${e.message}`);
 }
@@ -381,6 +510,22 @@ if (!absPathResult) {
   }
 }
 
+// ── 7b. PDF RENDER WAIT CONDITION ──────────────────────────────
+
+console.log('\n7b. PDF render wait condition');
+
+const generatePdfScript = readFile('generate-pdf.mjs');
+if (/waitUntil:\s*['"]load['"]/.test(generatePdfScript)) {
+  pass('generate-pdf waits for load before rendering');
+} else {
+  fail('generate-pdf does not wait for load before rendering');
+}
+if (!/waitUntil:\s*['"]networkidle['"]/.test(generatePdfScript)) {
+  pass('generate-pdf does not wait for networkidle');
+} else {
+  fail('generate-pdf still waits for networkidle');
+}
+
 // ── 8. MODE FILE INTEGRITY ──────────────────────────────────────
 
 console.log('\n8. Mode file integrity');
@@ -413,9 +558,9 @@ console.log('\n9. Local parser contract');
 
 const scanScript = readFile('scan.mjs');
 if (
-  scanScript.includes('typeof company.name !== \'string\'') &&
-  scanScript.includes('company.name.trim()') &&
-  scanScript.includes('company.name.toLowerCase()')
+  scanScript.includes('typeof entry.name !== \'string\'') &&
+  scanScript.includes('entry.name.trim()') &&
+  scanScript.includes('entry.name.toLowerCase()')
 ) {
   pass('scan.mjs guards company names before filtering');
 } else {
@@ -1307,6 +1452,68 @@ try {
   rmSync(ready, { recursive: true, force: true });
 } catch (e) {
   fail(`Cold-start trigger test crashed: ${e.message}`);
+}
+
+// ── 19. FONT INLINING (data: URLs, #951) ─────────────────────────
+
+console.log('\n19. Font inlining (data: URLs, #951)');
+
+try {
+  // Importing must not trigger the CLI (the import.meta.url guard); it
+  // exposes inlineLocalFonts, which renderHtmlToPdf runs before setContent.
+  const { inlineLocalFonts } = await import(pathToFileURL(join(ROOT, 'generate-pdf.mjs')).href);
+
+  // Chromium blocks file:// subresources from setContent() pages (the page
+  // stays at about:blank), so ./fonts refs must become data: URLs (#951).
+  const fontFile = readdirSync(join(ROOT, 'fonts')).find(f => f.endsWith('.woff2'));
+  const inlined = await inlineLocalFonts(
+    `<style>@font-face { src: url('./fonts/${fontFile}') format('woff2'); }</style>`
+  );
+  if (inlined.includes('data:font/woff2;base64,') && !inlined.includes('./fonts/')) {
+    pass('local ./fonts references are inlined as data: URLs');
+  } else {
+    fail('./fonts reference was not inlined as a data: URL — fonts will silently fall back (#951)');
+  }
+
+  // A missing font file must not corrupt the HTML or throw.
+  const missing = await inlineLocalFonts(`<style>src: url('./fonts/does-not-exist.woff2');</style>`);
+  if (missing.includes(`url('./fonts/does-not-exist.woff2')`)) {
+    pass('missing font files keep their original reference');
+  } else {
+    fail('missing font file mangled the url() reference');
+  }
+
+  // Traversal outside fonts/ must never be inlined — neither via ".."
+  // segments nor via absolute names (resolve() returns those verbatim).
+  const traversal = await inlineLocalFonts(`<style>src: url('./fonts/../cv.md');</style>`);
+  if (traversal.includes(`url('./fonts/../cv.md')`)) {
+    pass('path traversal outside fonts/ is not inlined');
+  } else {
+    fail('path traversal escaped the fonts/ directory');
+  }
+  const absolute = await inlineLocalFonts(`<style>src: url('./fonts//etc/passwd');</style>`);
+  if (absolute.includes(`url('./fonts//etc/passwd')`)) {
+    pass('absolute-path escape (./fonts//etc/passwd) is not inlined');
+  } else {
+    fail('absolute-path reference escaped the fonts/ directory');
+  }
+} catch (e) {
+  fail(`font inlining test crashed: ${e.message}`);
+}
+
+// ── Reverse-scan SSRF guard ──────────────────────────────────────
+
+try {
+  const { entryOnHost } = await import(pathToFileURL(join(ROOT, 'scan-ats-full.mjs')).href);
+  const canonical = entryOnHost('acme', 'https://jobs.lever.co/acme', (h) => h === 'jobs.lever.co');
+  const offHost = entryOnHost('acme', 'https://evil.example.com/acme', (h) => h === 'jobs.lever.co');
+  if (canonical && canonical.careers_url === 'https://jobs.lever.co/acme' && offHost === null) {
+    pass('scan-ats-full entryOnHost keeps canonical ATS hosts and drops others (SSRF guard)');
+  } else {
+    fail('scan-ats-full entryOnHost should keep canonical hosts and drop non-canonical ones');
+  }
+} catch (e) {
+  fail(`scan-ats-full host-guard test crashed: ${e.message}`);
 }
 
 // ── SUMMARY ─────────────────────────────────────────────────────

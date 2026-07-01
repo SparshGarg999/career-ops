@@ -19,6 +19,7 @@ All scripts live in the project root as `.mjs` modules and are exposed via `npm 
 | `npm run rollback` | `update-system.mjs rollback` | Rollback last update |
 | `npm run liveness` | `check-liveness.mjs` | Test if job URLs are still active |
 | `npm run scan` | `scan.mjs` | Zero-token portal scanner |
+| `npm run scan:full` | `scan-ats-full.mjs` | Reverse ATS discovery scanner |
 
 ---
 
@@ -100,6 +101,16 @@ Renders an HTML file to a print-quality, ATS-parseable PDF via headless Chromium
 npm run pdf -- input.html output.pdf
 npm run pdf -- input.html output.pdf --format=letter   # US letter
 npm run pdf -- input.html output.pdf --format=a4        # A4 (default)
+```
+
+**Environment variables:**
+
+| Variable | Description |
+|----------|-------------|
+| `CDP_URL` | Drive your already-running Chrome over the DevTools Protocol instead of launching a fresh headless browser. Start Chrome with `--remote-debugging-port=9222`, then set `CDP_URL=http://localhost:9222`. The connected browser is left open on exit. |
+
+```bash
+CDP_URL=http://localhost:9222 npm run pdf -- input.html output.pdf
 ```
 
 **Exit codes:** `0` PDF generated, `1` missing arguments or generation failure.
@@ -190,6 +201,16 @@ npm run liveness -- --file urls.txt
 
 Each URL gets a verdict: `active`, `expired`, or `uncertain` with a reason.
 
+**Environment variables:**
+
+| Variable | Description |
+|----------|-------------|
+| `CDP_URL` | Drive your already-running Chrome over the DevTools Protocol instead of launching a fresh headless browser. Pages reuse the connected browser's real profile, cookies and warmed-up session, so anti-bot walls (Cloudflare, etc.) don't trigger — and if a challenge appears, the captcha is solved in your own browser. Start Chrome with `--remote-debugging-port=9222`, then set `CDP_URL=http://localhost:9222`. The connected browser is left open on exit. |
+
+```bash
+CDP_URL=http://localhost:9222 npm run liveness -- https://example.com/job/123
+```
+
 **Exit codes:** `0` all URLs active, `1` any expired or uncertain.
 
 ---
@@ -197,6 +218,8 @@ Each URL gets a verdict: `active`, `expired`, or `uncertain` with a reason.
 ## scan
 
 Zero-token portal scanner. Runs configured local parsers for SSR/static career pages and hits ATS APIs (Greenhouse, Ashby, Lever) directly — no LLM tokens consumed. Reads `portals.yml` for target companies, outputs matching listings to stdout, and optionally appends to `data/pipeline.md`.
+
+`scan_history.recheck_after_days` in `portals.yml` lets old `added` URLs become eligible for recheck after the configured number of days. If absent, scan-history dedup keeps the historical behavior and dedups forever. Permanent invalid statuses such as blocked host and malformed URL remain permanent.
 
 For custom SSR pages, configure a tracked company with `scan_method: local_parser` and a `parser` block. The parser can be written in JavaScript, Python, or any language available as a local executable. Company-specific parsers usually already know their source URL and only need to print JSON jobs to stdout:
 
@@ -213,6 +236,40 @@ If a parser writes full extraction artifacts for debugging or audit, store them 
 
 ```bash
 npm run scan
+node scan.mjs --verify                     # Playwright-check each new URL; drop expired postings
+node scan.mjs --verify --headed-fallback   # retry anti-bot-blocked URLs in a headed browser (needs a display)
 ```
 
+**Environment variables:**
+
+| Variable | Description |
+|----------|-------------|
+| `CDP_URL` | Applies to the `--verify` liveness step. Drives your already-running Chrome over the DevTools Protocol (real profile/session, sidesteps bot detection, captchas solved in your browser) instead of a fresh headless launch. Start Chrome with `--remote-debugging-port=9222`, then set `CDP_URL=http://localhost:9222`. See the `liveness` section for details. |
+
 **Exit codes:** `0` scan completed, `1` configuration error or no portals.yml found.
+
+---
+
+## scan:full
+
+Reverse ATS discovery scanner. Where `scan.mjs` scans the companies you track in `portals.yml`, this inverts the direction: it walks public directories of companies per ATS (Greenhouse, Lever, Ashby, Workday) and surfaces fresh postings matching your `portals.yml` `title_filter` / `location_filter` — no manual company curation. Company directories come from the public [job-board-aggregator](https://github.com/Feashliaa/job-board-aggregator) dataset, cached in `data/cache/` for 24 hours.
+
+Postings without a usable publish date are skipped — a reverse scan is only useful for fresh postings. New matches are appended to `data/pipeline.md` and `data/scan-history.tsv` in the same format as `scan.mjs`.
+
+```bash
+npm run scan:full                              # all ATS directories, last 3 days
+node scan-ats-full.mjs --since 7               # postings from the last 7 days
+node scan-ats-full.mjs --ats greenhouse,workday # subset of sources
+node scan-ats-full.mjs --limit 200             # max companies per ATS
+node scan-ats-full.mjs --dry-run               # preview without writing
+node scan-ats-full.mjs --liveness              # Playwright-verify matches first
+node scan-ats-full.mjs --md-out notes/scans    # also write a dated markdown digest
+```
+
+**Environment variables:**
+
+| Variable | Description |
+|----------|-------------|
+| `CDP_URL` | Applies to the `--liveness` step. Drives your already-running Chrome over the DevTools Protocol (real profile/session, sidesteps bot detection) instead of a fresh headless launch. Start Chrome with `--remote-debugging-port=9222`, then set `CDP_URL=http://localhost:9222`. See the `liveness` section for details. |
+
+**Exit codes:** `0` scan completed, `1` configuration error (no portals.yml, unknown `--ats` source) or fatal scan error.

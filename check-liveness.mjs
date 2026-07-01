@@ -15,6 +15,7 @@
  */
 
 import { chromium } from 'playwright';
+import { acquireBrowser, releaseBrowser } from './browser.mjs';
 import { readFile } from 'fs/promises';
 import {
   checkUrlLivenessWithFallback,
@@ -58,9 +59,16 @@ async function main() {
   ].filter(Boolean);
   console.log(`Checking ${urls.length} URL(s)...${notes.length ? ` (${notes.join(', ')})` : ''}\n`);
 
-  const browser = await chromium.launch({ headless: true });
-  const page = await newLivenessPage(browser);
-  const headed = noFallback ? null : createHeadedPageProvider(chromium);
+  const handle = await acquireBrowser({ headless: true });
+  const { browser, remote } = handle;
+  if (remote) console.log(`🔓 Connected to browser via CDP: ${process.env.CDP_URL}\n`);
+
+  const page = await newLivenessPage(browser, { remote });
+  // In CDP mode the challenge fallback reuses the connected real browser (solve
+  // captchas there); locally it launches a headed Chromium unless --no-fallback.
+  const headed = noFallback
+    ? null
+    : createHeadedPageProvider(chromium, { cdpBrowser: remote ? browser : null });
   const getHeadedPage = headed ? () => headed.get() : undefined;
 
   let active = 0, expired = 0, uncertain = 0;
@@ -81,7 +89,7 @@ async function main() {
   }
 
   if (headed) await headed.close();
-  await browser.close();
+  await releaseBrowser(handle);
 
   console.log(`\nResults: ${active} active  ${expired} expired  ${uncertain} uncertain`);
   if (expired > 0 || uncertain > 0) process.exit(1);

@@ -23,7 +23,15 @@ export const LIVENESS_CONTEXT_OPTIONS = {
 
 // Open a page in a context that already presents a realistic UA. Both callers use
 // this instead of browser.newPage() so headless checks aren't instantly bot-walled.
-export async function newLivenessPage(browser) {
+//
+// CDP mode (`remote: true`): reuse the connected browser's existing default
+// context — your real profile, cookies and warmed-up session are what actually
+// defeats bot detection, so we don't spoof the UA or open a fresh context.
+export async function newLivenessPage(browser, { remote = false } = {}) {
+  if (remote) {
+    const context = browser.contexts()[0] || (await browser.newContext());
+    return context.newPage();
+  }
   const context = await browser.newContext(LIVENESS_CONTEXT_OPTIONS);
   return context.newPage();
 }
@@ -43,23 +51,68 @@ export function jitteredDelayMs(baseMs) {
 // Defensive guards: URLs come from ATS feeds (mostly trusted) but a misconfigured
 // portals.yml entry or a hijacked feed shouldn't be able to point Playwright at
 // internal infrastructure. Only allow http(s) and reject loopback/private/link-local.
+//
+// The hostname coming out of `new URL(...)` needs normalization before the regex
+// pass, because the WHATWG URL parser surfaces several encodings that bypass a
+// naive match against `parsed.hostname`:
+//   1. IPv6 hosts are serialized with brackets — `new URL('http://[::1]/').hostname`
+//      is `'[::1]'`, so a regex like `/^::1$/` never fires unless brackets are stripped.
+//   2. FQDN trailing dot is preserved — localhost. reaches the network as
+//      localhost, but `/^localhost$/` doesn't match it.
+//   3. IPv4-mapped IPv6 (`::ffff:127.0.0.1` or the hex form `::ffff:7f00:1`)
+//      routes to the embedded IPv4 in Chromium, so the embedded address must
+//      also be matched against the IPv4 block list.
+// `0.0.0.0` and the all-zeros IPv6 `::` both reach loopback on Linux and need
+// explicit entries; the original list omitted them.
 const PRIVATE_HOST_PATTERNS = [
-  /^localhost$/i,
+  /^localhost$/,
+  /^localhost\.localdomain$/,
+  /^0\.0\.0\.0$/,
   /^127\./,
   /^10\./,
   /^192\.168\./,
   /^172\.(1[6-9]|2\d|3[01])\./,
   /^169\.254\./,
   /^::1$/,
-  /^fc[0-9a-f]{2}:/i,
-  /^fe80:/i,
+  /^::$/,
+  /^fc[0-9a-f]{2}:/,
+  /^fe80:/,
 ];
+
+// Lowercase, strip IPv6 brackets, strip FQDN trailing dot. The `hostname`
+// returned by `new URL(...)` is already percent-decoded and IDNA-normalized,
+// but it preserves brackets around IPv6 hosts and trailing dots on FQDNs.
+function normalizeHost(rawHostname) {
+  if (!rawHostname) return '';
+  let h = String(rawHostname).toLowerCase();
+  if (h.startsWith('[') && h.endsWith(']')) h = h.slice(1, -1);
+  if (h.endsWith('.')) h = h.slice(0, -1);
+  return h;
+}
+
+// IPv4-mapped IPv6 (RFC 4291 §2.5.5.2): `::ffff:0:0/96` routes to the embedded
+// IPv4 address. Two textual forms — dotted (`::ffff:127.0.0.1`) and pure-hex
+// (`::ffff:7f00:1`). Return the embedded IPv4 in dotted-decimal form, or null
+// if `host` is not an IPv4-mapped IPv6.
+function extractMappedIPv4(host) {
+  const dotted = host.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+  if (dotted) return dotted[1];
+  const hex = host.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (hex) {
+    const a = parseInt(hex[1], 16);
+    const b = parseInt(hex[2], 16);
+    return `${(a >> 8) & 0xff}.${a & 0xff}.${(b >> 8) & 0xff}.${b & 0xff}`;
+  }
+  return null;
+}
 
 // Returns null when the URL is safe to fetch, otherwise a structured guard
 // result with a stable `code` (used for routing in scan.mjs) plus a human
 // `reason`. Stable codes — not regex on reason strings — drive downstream
 // dispatch so the wording can change freely without breaking callers.
-function rejectPrivateOrInvalid(url) {
+//
+// Exported for unit tests; the main entry point is checkUrlLiveness.
+export function rejectPrivateOrInvalid(url) {
   let parsed;
   try {
     parsed = new URL(url);
@@ -69,8 +122,13 @@ function rejectPrivateOrInvalid(url) {
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     return { code: 'unsupported_protocol', reason: `unsupported protocol ${parsed.protocol}` };
   }
-  if (PRIVATE_HOST_PATTERNS.some((pattern) => pattern.test(parsed.hostname))) {
-    return { code: 'blocked_host', reason: `blocked host ${parsed.hostname}` };
+  const host = normalizeHost(parsed.hostname);
+  const mappedIPv4 = extractMappedIPv4(host);
+  const candidates = mappedIPv4 ? [host, mappedIPv4] : [host];
+  for (const candidate of candidates) {
+    if (PRIVATE_HOST_PATTERNS.some((pattern) => pattern.test(candidate))) {
+      return { code: 'blocked_host', reason: `blocked host ${parsed.hostname}` };
+    }
   }
   return null;
 }
@@ -144,11 +202,35 @@ export function isChallengeResult(result) {
   return result?.result === 'uncertain' && CHALLENGE_CODES.has(result.code);
 }
 
-// Lazily owns a single headed browser/page, created only on first use and reused
-// across URLs. Headed Chromium needs a display, so launch can fail in headless/CI
-// environments — in that case get() returns null and callers degrade to the
-// headless result (challenge stays uncertain, never falsely expired).
-export function createHeadedPageProvider(chromium) {
+// Provides a page capable of clearing a bot-wall challenge, lazily and reused
+// across URLs.
+//
+// CDP mode (`cdpBrowser` passed): the connected browser is your real, visible
+// Chrome, so the challenge page opens *there*, in your existing profile context —
+// you solve the captcha in your own browser. We never launch a throwaway headed
+// instance and never close the CDP browser (the caller owns its lifecycle).
+//
+// Local mode: lazily launch one headed Chromium. Headed Chromium needs a display,
+// so launch can fail in headless/CI environments — in that case get() returns
+// null and callers degrade to the headless result (challenge stays uncertain,
+// never falsely expired).
+export function createHeadedPageProvider(chromium, { cdpBrowser = null } = {}) {
+  if (cdpBrowser) {
+    let page = null;
+    return {
+      async get() {
+        if (page) return page;
+        const context = cdpBrowser.contexts()[0] || (await cdpBrowser.newContext());
+        page = await context.newPage();
+        return page;
+      },
+      async close() {
+        // Leave the CDP browser and its context open — we don't own them.
+        page = null;
+      },
+    };
+  }
+
   let browser = null;
   let page = null;
   let launchFailed = false;

@@ -83,7 +83,7 @@ import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
 const DEFAULT_CSV = join(DATA_ROOT, 'data/Connections.csv');
-const TRACKER_PATH = resolveTrackerPath(DATA_ROOT);
+export const TRACKER_PATH = resolveTrackerPath(DATA_ROOT);
 const PORTALS_PATH = join(DATA_ROOT, 'portals.yml');
 const CONTACTS_PATH = join(DATA_ROOT, 'data/contacts.tsv');
 

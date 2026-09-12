@@ -51,7 +51,7 @@ import { renameSyncWithRetry } from './tracker-utils.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
 const DATA_ROOT = getCareerOpsRoot();
-const CANDIDATES_PATH = process.env.CAREER_OPS_REPLY_CANDIDATES
+export const CANDIDATES_PATH = process.env.CAREER_OPS_REPLY_CANDIDATES
   || path.join(DATA_ROOT, 'data', 'reply-candidates.json');
 
 

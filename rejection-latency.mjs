@@ -64,7 +64,7 @@ const DATA_ROOT = getCareerOpsRoot();
 const DEFAULT_ACTIVE_INTERVIEWS_PATH = existsSync(join(DATA_ROOT, 'data/active-interviews.md'))
   ? join(DATA_ROOT, 'data/active-interviews.md')
   : join(DATA_ROOT, 'active-interviews.md');
-const DEFAULT_TRACKER_PATH = resolveTrackerPath(DATA_ROOT);
+export const DEFAULT_TRACKER_PATH = resolveTrackerPath(DATA_ROOT);
 const PROFILE_FILE = process.env.CAREER_OPS_PROFILE || join(DATA_ROOT, 'config/profile.yml');
 
 export const DEFAULT_COURTESY_DAYS = 30;
